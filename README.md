@@ -18,7 +18,7 @@ The canonical install surface remains:
 - Hermes Workspace upstream:
   `outsourc-e/hermes-workspace@f8380b55c78a4179b72a97f59c6022c2e2fc77fc`
 - Hermes API upstream:
-  `outsourc-e/hermes-agent@v0.6.0`
+  `outsourc-e/hermes-agent@bd412640a6f76c57f2a97389fba24a7541595831`
 
 ## Umbrel Topology
 

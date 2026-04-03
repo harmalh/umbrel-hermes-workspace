@@ -10,7 +10,7 @@ on:
       hermes_ref:
         description: "outsourc-e/hermes-agent git ref (tag/branch/sha)"
         required: true
-        default: "v0.6.0"
+        default: "bd412640a6f76c57f2a97389fba24a7541595831"
       image_tag:
         description: "Registry tag for both images"
         required: true
