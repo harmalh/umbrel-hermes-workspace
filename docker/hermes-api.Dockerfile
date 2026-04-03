@@ -31,4 +31,4 @@ USER hermes
 
 EXPOSE 8642
 
-CMD ["hermes", "--gateway"]
+CMD ["hermes", "gateway", "run"]
