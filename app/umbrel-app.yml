@@ -4,7 +4,7 @@ name: Hermes Workspace
 tagline: Full Hermes browser workspace for chat, files, memory, and terminal
 icon: https://raw.githubusercontent.com/harmalh/umbrel-hermes-workspace/main/app/assets/icon.svg
 category: ai
-version: "0.1.0"
+version: "0.1.1"
 port: 23130
 description: >-
   Hermes Workspace is the full Hermes browser UI for chat, files, terminal,
@@ -28,10 +28,11 @@ repo: https://github.com/outsourc-e/hermes-workspace
 support: https://github.com/outsourc-e/hermes-workspace/issues
 gallery: []
 releaseNotes: >-
-  Initial Umbrel packaging for Hermes Workspace.
+  Fixed Hermes API binding so the bundled backend is reachable from the
+  workspace container on Umbrel.
 
-
-  Includes a production workspace UI plus a dedicated Hermes API backend service.
+  No image rebuild was required for this fix; this release updates the app
+  package wiring only.
 dependencies: []
 path: ""
 defaultUsername: ""
