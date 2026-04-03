@@ -5,7 +5,7 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY upstream-workspace/package.json upstream-workspace/pnpm-lock.yaml upstream-workspace/.npmrc ./
 
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
+RUN npm install -g pnpm && pnpm install --no-frozen-lockfile
 
 COPY upstream-workspace/ .
 
