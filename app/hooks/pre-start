@@ -1,0 +1,6 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+mkdir -p "${APP_DATA_DIR}/hermes"
+chown -R 1000:1000 "${APP_DATA_DIR}/hermes" || true
+chmod 700 "${APP_DATA_DIR}/hermes" || true

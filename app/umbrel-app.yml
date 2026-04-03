@@ -1,0 +1,38 @@
+manifestVersion: 1.1
+id: harmalh-hermes-workspace
+name: Hermes Workspace
+tagline: Full Hermes browser workspace for chat, files, memory, and terminal
+icon: https://raw.githubusercontent.com/harmalh/umbrel-hermes-workspace/main/app/assets/icon.svg
+category: ai
+version: "0.1.0"
+port: 23130
+description: >-
+  Hermes Workspace is the full Hermes browser UI for chat, files, terminal,
+  memory, skills, and session continuity on Umbrel.
+
+
+  This package runs a production build of outsourc-e/hermes-workspace in front
+  of a Hermes API service built from outsourc-e/hermes-agent.
+
+
+  The UI stays stateless while Hermes runtime data is persisted under
+  APP_DATA_DIR/hermes.
+
+
+  Build and publish both GHCR images before installing from the community store.
+developer: outsourc-e
+website: https://github.com/outsourc-e/hermes-workspace
+submitter: Harm Alhusen
+submission: https://github.com/harmalh/umbrel-hermes-workspace
+repo: https://github.com/outsourc-e/hermes-workspace
+support: https://github.com/outsourc-e/hermes-workspace/issues
+gallery: []
+releaseNotes: >-
+  Initial Umbrel packaging for Hermes Workspace.
+
+
+  Includes a production workspace UI plus a dedicated Hermes API backend service.
+dependencies: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""

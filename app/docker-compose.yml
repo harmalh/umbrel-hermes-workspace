@@ -1,0 +1,26 @@
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: harmalh-hermes-workspace_workspace_1
+      APP_PORT: 3000
+
+  workspace:
+    image: ghcr.io/harmalh/hermes-workspace-ui-umbrel:0.1.0
+    restart: on-failure
+    init: true
+    depends_on: [hermes-api]
+    environment:
+      NODE_ENV: "production"
+      HERMES_API_URL: "http://hermes-api:8642"
+
+  hermes-api:
+    image: ghcr.io/harmalh/hermes-workspace-api-umbrel:0.1.0
+    restart: on-failure
+    init: true
+    stop_grace_period: 1m
+    environment:
+      HOME: /opt/hermes-home
+    volumes:
+      - ${APP_DATA_DIR}/hermes:/opt/hermes-home

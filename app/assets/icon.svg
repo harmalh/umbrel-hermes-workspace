@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Hermes Agent">
+  <rect width="256" height="256" rx="48" fill="#1a1a2e"/>
+  <path fill="#e94560" d="M128 44c-26 0-48 18-52 42h-20v24h18c0 4 1 8 2 12H56v24h28l8 32h80l8-32h28v-24h-20c1-4 2-8 2-12h18V86h-20c-4-24-26-42-52-42zm0 24c14 0 26 10 30 24H98c4-14 16-24 30-24zm-34 72h68l-6 24H100l-6-24z"/>
+  <circle cx="128" cy="176" r="12" fill="#eaeaea"/>
+</svg>
