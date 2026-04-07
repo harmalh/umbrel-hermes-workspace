@@ -1,0 +1,7 @@
+{
+  "workspace_repo": "outsourc-e/hermes-workspace",
+  "workspace_ref": "f8380b55c78a4179b72a97f59c6022c2e2fc77fc",
+  "hermes_agent_repo": "outsourc-e/hermes-agent",
+  "hermes_agent_track": "default_branch_head",
+  "image_tag": "0.1.0"
+}
