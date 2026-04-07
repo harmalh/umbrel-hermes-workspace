@@ -1,0 +1,404 @@
+name: Release Hermes Workspace To Umbrel Community Store
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "versions.json"
+      - "docker/**"
+      - "app/**"
+      - ".github/workflows/release-to-umbrel-community-store.yml"
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Optional release version override for the Umbrel app"
+        required: false
+        default: ""
+      image_tag:
+        description: "Optional GHCR image tag override"
+        required: false
+        default: ""
+
+concurrency:
+  group: release-hermes-workspace-store-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      COMMUNITY_STORE_REPO: harmalh/umbrel-community-store
+      COMMUNITY_STORE_APP_DIR: harmalh-hermes-workspace
+      UI_IMAGE_NAME: ghcr.io/harmalh/hermes-workspace-ui-umbrel
+      API_IMAGE_NAME: ghcr.io/harmalh/hermes-workspace-api-umbrel
+
+    steps:
+      - name: Verify community store token is configured
+        shell: bash
+        env:
+          COMMUNITY_STORE_PAT: ${{ secrets.COMMUNITY_STORE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COMMUNITY_STORE_PAT}" ]; then
+            echo "Missing required secret COMMUNITY_STORE_PAT" >&2
+            echo "Create a fine-grained GitHub token with Contents: Read and write on harmalh/umbrel-community-store." >&2
+            exit 1
+          fi
+
+      - name: Checkout packaging repo
+        uses: actions/checkout@v6
+
+      - name: Checkout community store repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.COMMUNITY_STORE_REPO }}
+          token: ${{ secrets.COMMUNITY_STORE_PAT }}
+          path: community-store
+
+      - name: Read packaging build config
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(Path('versions.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              for key in (
+                  'workspace_repo',
+                  'workspace_ref',
+                  'hermes_agent_repo',
+                  'hermes_agent_track',
+                  'image_tag',
+              ):
+                  fh.write(f"{key}={config[key]}\n")
+          PY
+
+      - name: Resolve latest Hermes Agent commit from upstream default branch
+        id: hermes_ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="${{ steps.config.outputs.hermes_agent_repo }}"
+          remote_url="https://github.com/${repo}.git"
+
+          default_branch="$(git ls-remote --symref "${remote_url}" HEAD | awk '/^ref:/ {sub("refs/heads/", "", $2); print $2}')"
+          hermes_sha="$(git ls-remote "${remote_url}" "refs/heads/${default_branch}" | awk '{print $1}')"
+
+          if [ -z "${default_branch}" ] || [ -z "${hermes_sha}" ]; then
+            echo "Failed to resolve latest Hermes Agent upstream commit" >&2
+            exit 1
+          fi
+
+          echo "default_branch=${default_branch}" >> "$GITHUB_OUTPUT"
+          echo "sha=${hermes_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine release version and image tag
+        id: release
+        shell: bash
+        env:
+          OVERRIDE_RELEASE_VERSION: ${{ github.event.inputs.release_version }}
+          OVERRIDE_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          store_manifest = Path('community-store') / os.environ['COMMUNITY_STORE_APP_DIR'] / 'umbrel-app.yml'
+          current_version = '0.1.0'
+          if store_manifest.exists():
+              text = store_manifest.read_text(encoding='utf-8')
+              match = re.search(r'^version:\s*"([^"]+)"', text, flags=re.MULTILINE)
+              if match:
+                  current_version = match.group(1)
+
+          override_release = os.environ.get('OVERRIDE_RELEASE_VERSION', '').strip()
+          if override_release:
+              next_version = override_release
+          else:
+              parts = current_version.split('.')
+              if len(parts) != 3 or any(not p.isdigit() for p in parts):
+                  raise SystemExit(f'Current Umbrel app version is not simple semver: {current_version}')
+              major, minor, patch = map(int, parts)
+              next_version = f'{major}.{minor}.{patch + 1}'
+
+          override_image_tag = os.environ.get('OVERRIDE_IMAGE_TAG', '').strip()
+          image_tag = override_image_tag or next_version
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              fh.write(f'current_version={current_version}\n')
+              fh.write(f'next_version={next_version}\n')
+              fh.write(f'image_tag={image_tag}\n')
+          PY
+
+      - name: Show resolved release plan
+        shell: bash
+        run: |
+          echo "Workspace repo:   ${{ steps.config.outputs.workspace_repo }}"
+          echo "Workspace ref:    ${{ steps.config.outputs.workspace_ref }}"
+          echo "Hermes repo:      ${{ steps.config.outputs.hermes_agent_repo }}"
+          echo "Hermes branch:    ${{ steps.hermes_ref.outputs.default_branch }}"
+          echo "Hermes commit:    ${{ steps.hermes_ref.outputs.sha }}"
+          echo "Current version:  ${{ steps.release.outputs.current_version }}"
+          echo "Release version:  ${{ steps.release.outputs.next_version }}"
+          echo "Image tag:        ${{ steps.release.outputs.image_tag }}"
+
+      - name: Checkout upstream Hermes Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.config.outputs.workspace_repo }}
+          ref: ${{ steps.config.outputs.workspace_ref }}
+          path: upstream-workspace
+
+      - name: Checkout upstream Hermes Agent at latest commit
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.config.outputs.hermes_agent_repo }}
+          ref: ${{ steps.hermes_ref.outputs.sha }}
+          path: upstream-hermes
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push workspace UI image
+        id: ui_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/workspace.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.UI_IMAGE_NAME }}:${{ steps.release.outputs.image_tag }}
+
+      - name: Build and push Hermes API image
+        id: api_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/hermes-api.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.API_IMAGE_NAME }}:${{ steps.release.outputs.image_tag }}
+
+      - name: Print digests
+        shell: bash
+        run: |
+          echo "UI digest:  ${{ steps.ui_build.outputs.digest }}"
+          echo "API digest: ${{ steps.api_build.outputs.digest }}"
+
+      - name: Write build metadata
+        shell: bash
+        run: |
+          cat > build-metadata.json <<EOF
+          {
+            "workspace_repo": "${{ steps.config.outputs.workspace_repo }}",
+            "workspace_ref": "${{ steps.config.outputs.workspace_ref }}",
+            "hermes_agent_repo": "${{ steps.config.outputs.hermes_agent_repo }}",
+            "hermes_agent_default_branch": "${{ steps.hermes_ref.outputs.default_branch }}",
+            "hermes_agent_ref": "${{ steps.hermes_ref.outputs.sha }}",
+            "release_version": "${{ steps.release.outputs.next_version }}",
+            "image_tag": "${{ steps.release.outputs.image_tag }}",
+            "ui_digest": "${{ steps.ui_build.outputs.digest }}",
+            "api_digest": "${{ steps.api_build.outputs.digest }}"
+          }
+          EOF
+          cat build-metadata.json
+
+      - name: Upload build metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-metadata
+          path: build-metadata.json
+
+      - name: Local smoke tests (amd64 only)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f docker/hermes-api.Dockerfile \
+            -t local/hermes-workspace-api:${{ github.run_id }} \
+            .
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f docker/workspace.Dockerfile \
+            -t local/hermes-workspace-ui:${{ github.run_id }} \
+            .
+
+          mkdir -p /tmp/hermes-workspace-home
+          chmod 0777 /tmp/hermes-workspace-home
+
+          api_cid="$(docker run -d \
+            -e HOME=/opt/hermes-home \
+            -v /tmp/hermes-workspace-home:/opt/hermes-home \
+            -p 8642:8642 \
+            local/hermes-workspace-api:${{ github.run_id }})"
+
+          api_ok="false"
+          for i in $(seq 1 90); do
+            if bash -lc 'exec 3<>/dev/tcp/127.0.0.1/8642' 2>/dev/null; then
+              api_ok="true"
+              break
+            fi
+            sleep 2
+          done
+
+          docker logs "${api_cid}" --tail 250
+          if [ "${api_ok}" != "true" ]; then
+            docker rm -f "${api_cid}" || true
+            echo "Hermes API did not start listening on port 8642" >&2
+            exit 1
+          fi
+
+          ui_cid="$(docker run -d \
+            --add-host=host.docker.internal:host-gateway \
+            -e HERMES_API_URL=http://host.docker.internal:8642 \
+            -p 3000:3000 \
+            local/hermes-workspace-ui:${{ github.run_id }})"
+
+          ui_ok="false"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/ >/tmp/hermes-workspace-ui.html; then
+              ui_ok="true"
+              break
+            fi
+            sleep 2
+          done
+
+          docker logs "${ui_cid}" --tail 250
+          docker rm -f "${ui_cid}" || true
+          docker rm -f "${api_cid}" || true
+
+          if [ "${ui_ok}" != "true" ]; then
+            echo "Hermes Workspace UI did not become ready on port 3000" >&2
+            exit 1
+          fi
+
+      - name: Prepare community store release files
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.next_version }}
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          UI_DIGEST: ${{ steps.ui_build.outputs.digest }}
+          API_DIGEST: ${{ steps.api_build.outputs.digest }}
+          WORKSPACE_REF: ${{ steps.config.outputs.workspace_ref }}
+          HERMES_AGENT_REF: ${{ steps.hermes_ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          target_dir="community-store/${COMMUNITY_STORE_APP_DIR}"
+          rm -rf "${target_dir}"
+          mkdir -p "${target_dir}"
+          cp -R app/. "${target_dir}/"
+
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          target_dir = Path('community-store') / os.environ['COMMUNITY_STORE_APP_DIR']
+          compose_path = target_dir / 'docker-compose.yml'
+          manifest_path = target_dir / 'umbrel-app.yml'
+
+          release_version = os.environ['RELEASE_VERSION']
+          image_tag = os.environ['IMAGE_TAG']
+          ui_digest = os.environ['UI_DIGEST']
+          api_digest = os.environ['API_DIGEST']
+          workspace_ref = os.environ['WORKSPACE_REF']
+          hermes_agent_ref = os.environ['HERMES_AGENT_REF']
+
+          compose_text = compose_path.read_text(encoding='utf-8')
+          compose_text = re.sub(
+              r'(^\s*image:\s*)ghcr\.io/harmalh/hermes-workspace-ui-umbrel:[^\s]+$',
+              rf'\1ghcr.io/harmalh/hermes-workspace-ui-umbrel:{image_tag}@{ui_digest}',
+              compose_text,
+              flags=re.MULTILINE,
+          )
+          compose_text = re.sub(
+              r'(^\s*image:\s*)ghcr\.io/harmalh/hermes-workspace-api-umbrel:[^\s]+$',
+              rf'\1ghcr.io/harmalh/hermes-workspace-api-umbrel:{image_tag}@{api_digest}',
+              compose_text,
+              flags=re.MULTILINE,
+          )
+          compose_path.write_text(compose_text, encoding='utf-8')
+
+          manifest_text = manifest_path.read_text(encoding='utf-8')
+          manifest_text = re.sub(
+              r'^version:\s*"[^"]+"',
+              f'version: "{release_version}"',
+              manifest_text,
+              flags=re.MULTILINE,
+          )
+          manifest_text = re.sub(
+              r'^icon:\s*.*$',
+              'icon: https://raw.githubusercontent.com/harmalh/umbrel-community-store/main/harmalh-hermes-workspace/assets/icon.svg',
+              manifest_text,
+              flags=re.MULTILINE,
+          )
+          manifest_text = re.sub(
+              r'^submission:\s*.*$',
+              'submission: https://github.com/harmalh/umbrel-community-store',
+              manifest_text,
+              flags=re.MULTILINE,
+          )
+
+          release_notes_block = (
+              'releaseNotes: >-\n'
+              '  Automated private release from harmalh/umbrel-hermes-workspace.\n\n'
+              f'  Workspace ref: {workspace_ref}\n'
+              f'  Hermes Agent ref: {hermes_agent_ref}\n'
+              f'  UI image: ghcr.io/harmalh/hermes-workspace-ui-umbrel:{image_tag}@{ui_digest}\n'
+              f'  API image: ghcr.io/harmalh/hermes-workspace-api-umbrel:{image_tag}@{api_digest}\n'
+          )
+
+          manifest_text = re.sub(
+              r'(?ms)^releaseNotes:\s*>-\n.*?^dependencies:\s*\[\]\s*$',
+              release_notes_block + 'dependencies: []',
+              manifest_text,
+          )
+
+          manifest_path.write_text(manifest_text + '\n', encoding='utf-8')
+          PY
+
+      - name: Commit and push community store release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd community-store
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "${COMMUNITY_STORE_APP_DIR}"
+
+          if git diff --cached --quiet; then
+            echo "No community store changes to publish"
+            exit 0
+          fi
+
+          git commit -m "Release Hermes Workspace ${{ steps.release.outputs.next_version }}"
+          git push origin HEAD:main
