@@ -1,0 +1,252 @@
+name: Build Hermes Workspace Images (Auto-pinned Hermes Agent)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "versions.json"
+      - "docker/**"
+      - "app/**"
+      - ".github/workflows/build-workspace-images-auto.yml"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional registry tag override for both images"
+        required: false
+        default: ""
+      push_image:
+        description: "Push built images to GHCR"
+        type: boolean
+        required: true
+        default: false
+
+concurrency:
+  group: build-hermes-workspace-auto-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout packaging repo
+        uses: actions/checkout@v6
+
+      - name: Read build config from versions.json
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          config = json.loads(Path('versions.json').read_text())
+          out = Path('${GITHUB_OUTPUT}')
+          with out.open('a', encoding='utf-8') as fh:
+              for key in (
+                  'workspace_repo',
+                  'workspace_ref',
+                  'hermes_agent_repo',
+                  'hermes_agent_track',
+                  'image_tag',
+              ):
+                  fh.write(f"{key}={config[key]}\n")
+          PY
+
+      - name: Resolve latest Hermes Agent commit from upstream default branch
+        id: hermes_ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="${{ steps.config.outputs.hermes_agent_repo }}"
+          remote_url="https://github.com/${repo}.git"
+
+          default_branch="$(git ls-remote --symref "${remote_url}" HEAD | awk '/^ref:/ {sub("refs/heads/", "", $2); print $2}')"
+          hermes_sha="$(git ls-remote "${remote_url}" "refs/heads/${default_branch}" | awk '{print $1}')"
+
+          if [ -z "${default_branch}" ] || [ -z "${hermes_sha}" ]; then
+            echo "Failed to resolve latest Hermes Agent upstream commit" >&2
+            exit 1
+          fi
+
+          echo "default_branch=${default_branch}" >> "$GITHUB_OUTPUT"
+          echo "sha=${hermes_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine build settings
+        id: settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_tag="${{ steps.config.outputs.image_tag }}"
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            image_tag="${{ github.event.inputs.image_tag }}"
+          fi
+
+          push_image="false"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            push_image="true"
+          elif [ "${{ github.event.inputs.push_image }}" = "true" ]; then
+            push_image="true"
+          fi
+
+          echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
+          echo "push_image=${push_image}" >> "$GITHUB_OUTPUT"
+
+      - name: Show resolved source refs
+        run: |
+          echo "Workspace repo:  ${{ steps.config.outputs.workspace_repo }}"
+          echo "Workspace ref:   ${{ steps.config.outputs.workspace_ref }}"
+          echo "Hermes repo:     ${{ steps.config.outputs.hermes_agent_repo }}"
+          echo "Hermes branch:   ${{ steps.hermes_ref.outputs.default_branch }}"
+          echo "Hermes commit:   ${{ steps.hermes_ref.outputs.sha }}"
+          echo "Image tag:       ${{ steps.settings.outputs.image_tag }}"
+          echo "Push images:     ${{ steps.settings.outputs.push_image }}"
+
+      - name: Checkout upstream Hermes Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.config.outputs.workspace_repo }}
+          ref: ${{ steps.config.outputs.workspace_ref }}
+          path: upstream-workspace
+
+      - name: Checkout upstream Hermes Agent at latest commit
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.config.outputs.hermes_agent_repo }}
+          ref: ${{ steps.hermes_ref.outputs.sha }}
+          path: upstream-hermes
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: ${{ steps.settings.outputs.push_image == 'true' }}
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build workspace UI image
+        id: ui_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/workspace.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.settings.outputs.push_image == 'true' }}
+          tags: |
+            ghcr.io/harmalh/hermes-workspace-ui-umbrel:${{ steps.settings.outputs.image_tag }}
+
+      - name: Build Hermes API image
+        id: api_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/hermes-api.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.settings.outputs.push_image == 'true' }}
+          tags: |
+            ghcr.io/harmalh/hermes-workspace-api-umbrel:${{ steps.settings.outputs.image_tag }}
+
+      - name: Print digests
+        if: ${{ steps.settings.outputs.push_image == 'true' }}
+        run: |
+          echo "UI digest:  ${{ steps.ui_build.outputs.digest }}"
+          echo "API digest: ${{ steps.api_build.outputs.digest }}"
+
+      - name: Write build metadata
+        run: |
+          cat > build-metadata.json <<EOF
+          {
+            "workspace_repo": "${{ steps.config.outputs.workspace_repo }}",
+            "workspace_ref": "${{ steps.config.outputs.workspace_ref }}",
+            "hermes_agent_repo": "${{ steps.config.outputs.hermes_agent_repo }}",
+            "hermes_agent_default_branch": "${{ steps.hermes_ref.outputs.default_branch }}",
+            "hermes_agent_ref": "${{ steps.hermes_ref.outputs.sha }}",
+            "image_tag": "${{ steps.settings.outputs.image_tag }}"
+          }
+          EOF
+          cat build-metadata.json
+
+      - name: Upload build metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-metadata
+          path: build-metadata.json
+
+      - name: Local smoke tests (amd64 only)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f docker/hermes-api.Dockerfile \
+            -t local/hermes-workspace-api:${{ github.run_id }} \
+            .
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f docker/workspace.Dockerfile \
+            -t local/hermes-workspace-ui:${{ github.run_id }} \
+            .
+
+          mkdir -p /tmp/hermes-workspace-home
+          chmod 0777 /tmp/hermes-workspace-home
+
+          api_cid="$(docker run -d \
+            -e HOME=/opt/hermes-home \
+            -v /tmp/hermes-workspace-home:/opt/hermes-home \
+            -p 8642:8642 \
+            local/hermes-workspace-api:${{ github.run_id }})"
+
+          api_ok="false"
+          for i in $(seq 1 90); do
+            if bash -lc 'exec 3<>/dev/tcp/127.0.0.1/8642' 2>/dev/null; then
+              api_ok="true"
+              break
+            fi
+            sleep 2
+          done
+
+          docker logs "${api_cid}" --tail 250
+          if [ "${api_ok}" != "true" ]; then
+            docker rm -f "${api_cid}" || true
+            echo "Hermes API did not start listening on port 8642" >&2
+            exit 1
+          fi
+
+          ui_cid="$(docker run -d \
+            --add-host=host.docker.internal:host-gateway \
+            -e HERMES_API_URL=http://host.docker.internal:8642 \
+            -p 3000:3000 \
+            local/hermes-workspace-ui:${{ github.run_id }})"
+
+          ui_ok="false"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/ >/tmp/hermes-workspace-ui.html; then
+              ui_ok="true"
+              break
+            fi
+            sleep 2
+          done
+
+          docker logs "${ui_cid}" --tail 250
+          docker rm -f "${ui_cid}" || true
+          docker rm -f "${api_cid}" || true
+
+          if [ "${ui_ok}" != "true" ]; then
+            echo "Hermes Workspace UI did not become ready on port 3000" >&2
+            exit 1
+          fi
