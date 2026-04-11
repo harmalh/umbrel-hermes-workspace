@@ -18,9 +18,11 @@ The canonical install surface remains:
 The editable packaging source configuration lives in `versions.json`.
 
 - Hermes Workspace upstream repo/ref are read from that file.
-- Hermes Agent is tracked from the configured upstream repo, but the release
-  workflow resolves the **latest commit on the upstream default branch at
-  release time**.
+- Hermes API upstream is pinned to a specific tested `outsourc-e/hermes-agent`
+  commit for reproducible Umbrel releases.
+- Current tested release pins:
+  - `outsourc-e/hermes-workspace@379f3b102a2296a60ae720b5aeeeae3990e60256`
+  - `outsourc-e/hermes-agent@fe38075e974aba9d13b22b71e7e351284fcb333b`
 
 ## Umbrel Topology
 
@@ -42,7 +44,7 @@ The canonical pipeline is:
 
 That workflow:
 
-1. resolves the latest upstream Hermes Agent commit,
+1. uses the tested upstream refs recorded in `versions.json`,
 2. builds and pushes both GHCR images,
 3. smoke-tests the packaged UI and API,
 4. rewrites the digest-pinned image references for the Umbrel app, and

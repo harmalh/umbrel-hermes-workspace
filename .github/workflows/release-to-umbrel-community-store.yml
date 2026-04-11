@@ -7,7 +7,7 @@ on:
     paths:
       - "versions.json"
       - "docker/**"
-      - "app/**"
+      - "app/umbrel-app.yml"
       - ".github/workflows/release-to-umbrel-community-store.yml"
   workflow_dispatch:
     inputs:
@@ -82,23 +82,30 @@ jobs:
                   fh.write(f"{key}={config[key]}\n")
           PY
 
-      - name: Resolve latest Hermes Agent commit from upstream default branch
+      - name: Resolve pinned Hermes Agent commit
         id: hermes_ref
         shell: bash
         run: |
           set -euo pipefail
-          repo="${{ steps.config.outputs.hermes_agent_repo }}"
-          remote_url="https://github.com/${repo}.git"
-
-          default_branch="$(git ls-remote --symref "${remote_url}" HEAD | awk '/^ref:/ {sub("refs/heads/", "", $2); print $2}')"
-          hermes_sha="$(git ls-remote "${remote_url}" "refs/heads/${default_branch}" | awk '{print $1}')"
-
-          if [ -z "${default_branch}" ] || [ -z "${hermes_sha}" ]; then
-            echo "Failed to resolve latest Hermes Agent upstream commit" >&2
+          hermes_track="${{ steps.config.outputs.hermes_agent_track }}"
+          if [ -z "${hermes_track}" ]; then
+            echo "versions.json is missing hermes_agent_track" >&2
             exit 1
           fi
-
-          echo "default_branch=${default_branch}" >> "$GITHUB_OUTPUT"
+          case "${hermes_track}" in
+            commit:*)
+              hermes_sha="${hermes_track#commit:}"
+              ;;
+            *)
+              echo "Unsupported hermes_agent_track format: ${hermes_track}" >&2
+              exit 1
+              ;;
+          esac
+          if [ -z "${hermes_sha}" ]; then
+            echo "Resolved empty Hermes Agent commit" >&2
+            exit 1
+          fi
+          echo "default_branch=pinned" >> "$GITHUB_OUTPUT"
           echo "sha=${hermes_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Determine release version and image tag
@@ -160,7 +167,7 @@ jobs:
           ref: ${{ steps.config.outputs.workspace_ref }}
           path: upstream-workspace
 
-      - name: Checkout upstream Hermes Agent at latest commit
+      - name: Checkout pinned upstream Hermes Agent commit
         uses: actions/checkout@v6
         with:
           repository: ${{ steps.config.outputs.hermes_agent_repo }}

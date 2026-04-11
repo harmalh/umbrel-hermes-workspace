@@ -4,7 +4,7 @@ name: Hermes Workspace
 tagline: Full Hermes browser workspace for chat, files, memory, and terminal
 icon: https://raw.githubusercontent.com/harmalh/umbrel-hermes-workspace/main/app/assets/icon.svg
 category: ai
-version: "0.1.2"
+version: "0.1.3"
 port: 23130
 description: >-
   Hermes Workspace is the full Hermes browser UI for chat, files, terminal,
@@ -28,11 +28,11 @@ repo: https://github.com/outsourc-e/hermes-workspace
 support: https://github.com/outsourc-e/hermes-workspace/issues
 gallery: []
 releaseNotes: >-
-  Fixed the Hermes Workspace pre-start hook permissions so Umbrel actually
-  runs the backend state-directory bootstrap.
+  Update Hermes Workspace to upstream commit 379f3b102a2296a60ae720b5aeeeae3990e60256
+  and refresh the bundled Hermes API to fe38075e974aba9d13b22b71e7e351284fcb333b.
 
-  Without this, the mounted Hermes data directory could stay root-owned and
-  prevent the bundled backend from starting.
+  This release picks up the newer Workspace v1-era fixes, including the chat
+  history/tab-switch fix, and ships new digest-pinned UI and API images.
 dependencies: []
 path: ""
 defaultUsername: ""
