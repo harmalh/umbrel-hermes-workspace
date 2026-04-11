@@ -1,3 +1,4 @@
+# Retry note: push-triggered rerun after transient GHCR timeout
 name: Build Hermes Workspace Images (Manual)
 
 on:
