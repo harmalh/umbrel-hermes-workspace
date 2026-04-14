@@ -1,0 +1,239 @@
+name: Release Hermes Workspace Upstream v1.0.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/release-upstream-v1.0.0.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: release-hermes-workspace-upstream-v1-0-0-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      COMMUNITY_STORE_REPO: harmalh/umbrel-community-store
+      COMMUNITY_STORE_APP_DIR: harmalh-hermes-workspace
+      UI_IMAGE_NAME: ghcr.io/harmalh/hermes-workspace-ui-umbrel
+      API_IMAGE_NAME: ghcr.io/harmalh/hermes-workspace-api-umbrel
+      RELEASE_VERSION: 1.0.0
+      IMAGE_TAG: 1.0.0
+      WORKSPACE_REPO: outsourc-e/hermes-workspace
+      WORKSPACE_REF: v1.0.0
+      HERMES_AGENT_REPO: NousResearch/hermes-agent
+      HERMES_AGENT_REF: v2026.4.13
+
+    steps:
+      - name: Verify community store token is configured
+        shell: bash
+        env:
+          COMMUNITY_STORE_PAT: ${{ secrets.COMMUNITY_STORE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COMMUNITY_STORE_PAT}" ]; then
+            echo "Missing required secret COMMUNITY_STORE_PAT" >&2
+            exit 1
+          fi
+
+      - name: Checkout packaging repo
+        uses: actions/checkout@v6
+
+      - name: Checkout community store repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.COMMUNITY_STORE_REPO }}
+          token: ${{ secrets.COMMUNITY_STORE_PAT }}
+          path: community-store
+
+      - name: Checkout upstream Hermes Workspace
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: ${{ env.WORKSPACE_REF }}
+          path: upstream-workspace
+
+      - name: Checkout upstream Hermes Agent
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.HERMES_AGENT_REPO }}
+          ref: ${{ env.HERMES_AGENT_REF }}
+          path: upstream-hermes
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push workspace UI image
+        id: ui_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/workspace.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.UI_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Build and push Hermes API image
+        id: api_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/hermes-api.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.API_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Local smoke tests (amd64 only)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f docker/hermes-api.Dockerfile \
+            -t local/hermes-workspace-api:${{ github.run_id }} \
+            .
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f docker/workspace.Dockerfile \
+            -t local/hermes-workspace-ui:${{ github.run_id }} \
+            .
+
+          mkdir -p /tmp/hermes-workspace-home
+          chmod 0777 /tmp/hermes-workspace-home
+
+          api_cid="$(docker run -d \
+            -e HOME=/opt/hermes-home \
+            -v /tmp/hermes-workspace-home:/opt/hermes-home \
+            -p 8642:8642 \
+            local/hermes-workspace-api:${{ github.run_id }})"
+
+          api_ok="false"
+          for i in $(seq 1 90); do
+            if bash -lc 'exec 3<>/dev/tcp/127.0.0.1/8642' 2>/dev/null; then
+              api_ok="true"
+              break
+            fi
+            sleep 2
+          done
+
+          ui_cid="$(docker run -d \
+            --add-host=host.docker.internal:host-gateway \
+            -e HERMES_API_URL=http://host.docker.internal:8642 \
+            -p 3000:3000 \
+            local/hermes-workspace-ui:${{ github.run_id }})"
+
+          ui_ok="false"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/ >/tmp/hermes-workspace-ui.html; then
+              ui_ok="true"
+              break
+            fi
+            sleep 2
+          done
+
+          docker logs "${ui_cid}" --tail 250 || true
+          docker logs "${api_cid}" --tail 250 || true
+          docker rm -f "${ui_cid}" || true
+          docker rm -f "${api_cid}" || true
+
+          if [ "${api_ok}" != "true" ] || [ "${ui_ok}" != "true" ]; then
+            echo "Workspace smoke test failed" >&2
+            exit 1
+          fi
+
+      - name: Prepare community store release files
+        shell: bash
+        env:
+          UI_DIGEST: ${{ steps.ui_build.outputs.digest }}
+          API_DIGEST: ${{ steps.api_build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          target_dir="community-store/${COMMUNITY_STORE_APP_DIR}"
+          rm -rf "${target_dir}"
+          mkdir -p "${target_dir}"
+          cp -R app/. "${target_dir}/"
+
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          target_dir = Path('community-store') / os.environ['COMMUNITY_STORE_APP_DIR']
+          compose_path = target_dir / 'docker-compose.yml'
+          manifest_path = target_dir / 'umbrel-app.yml'
+
+          release_version = os.environ['RELEASE_VERSION']
+          image_tag = os.environ['IMAGE_TAG']
+          ui_digest = os.environ['UI_DIGEST']
+          api_digest = os.environ['API_DIGEST']
+          workspace_ref = os.environ['WORKSPACE_REF']
+          hermes_ref = os.environ['HERMES_AGENT_REF']
+
+          compose_text = compose_path.read_text(encoding='utf-8')
+          compose_text = re.sub(
+              r'(^\s*image:\s*)ghcr\.io/harmalh/hermes-workspace-ui-umbrel:[^\s]+$',
+              rf'\1ghcr.io/harmalh/hermes-workspace-ui-umbrel:{image_tag}@{ui_digest}',
+              compose_text,
+              flags=re.MULTILINE,
+          )
+          compose_text = re.sub(
+              r'(^\s*image:\s*)ghcr\.io/harmalh/hermes-workspace-api-umbrel:[^\s]+$',
+              rf'\1ghcr.io/harmalh/hermes-workspace-api-umbrel:{image_tag}@{api_digest}',
+              compose_text,
+              flags=re.MULTILINE,
+          )
+          compose_path.write_text(compose_text, encoding='utf-8')
+
+          manifest_text = manifest_path.read_text(encoding='utf-8')
+          manifest_text = re.sub(r'^version:\s*"[^"]+"', f'version: "{release_version}"', manifest_text, flags=re.MULTILINE)
+          manifest_text = re.sub(r'^icon:\s*.*$', 'icon: https://raw.githubusercontent.com/harmalh/umbrel-community-store/main/harmalh-hermes-workspace/assets/icon.svg', manifest_text, flags=re.MULTILINE)
+          manifest_text = re.sub(r'^submission:\s*.*$', 'submission: https://github.com/harmalh/umbrel-community-store', manifest_text, flags=re.MULTILINE)
+          release_notes_block = (
+              'releaseNotes: >-\n'
+              '  Upstream release sync for Hermes Workspace v1.0.0.\n\n'
+              f'  Workspace ref: {workspace_ref}\n'
+              f'  Hermes Agent ref: {hermes_ref}\n'
+              f'  UI image: ghcr.io/harmalh/hermes-workspace-ui-umbrel:{image_tag}@{ui_digest}\n'
+              f'  API image: ghcr.io/harmalh/hermes-workspace-api-umbrel:{image_tag}@{api_digest}\n'
+          )
+          manifest_text = re.sub(r'(?ms)^releaseNotes:\s*>-\n.*?^dependencies:\s*\[\]\s*$', release_notes_block + 'dependencies: []', manifest_text)
+          manifest_path.write_text(manifest_text + '\n', encoding='utf-8')
+          PY
+
+      - name: Commit and push community store release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd community-store
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${COMMUNITY_STORE_APP_DIR}"
+          if git diff --cached --quiet; then
+            echo "No community store changes to publish"
+            exit 0
+          fi
+          git commit -m "Release Hermes Workspace ${{ env.RELEASE_VERSION }}"
+          git push origin HEAD:main
