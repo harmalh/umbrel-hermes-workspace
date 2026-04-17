@@ -49,7 +49,7 @@ jobs:
             echo "Create a fine-grained GitHub token with Contents: Read and write on harmalh/umbrel-community-store." >&2
             exit 1
           fi
-          git ls-remote "https://x-access-token:${COMMUNITY_STORE_PAT}@github.com/harmalh/umbrel-community-store.git" HEAD >/dev/null
+          git ls-remote "https://harmalh:${COMMUNITY_STORE_PAT}@github.com/harmalh/umbrel-community-store.git" HEAD >/dev/null
 
       - name: Checkout packaging repo
         uses: actions/checkout@v6
@@ -247,7 +247,7 @@ jobs:
           cd community-store
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${COMMUNITY_STORE_PAT}@github.com/${COMMUNITY_STORE_REPO}.git"
+          git remote set-url origin "https://harmalh:${COMMUNITY_STORE_PAT}@github.com/${COMMUNITY_STORE_REPO}.git"
           git add "${COMMUNITY_STORE_APP_DIR}"
           if git diff --cached --quiet; then
             echo "No community store changes to publish"
