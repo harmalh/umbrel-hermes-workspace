@@ -60,10 +60,13 @@ jobs:
           repository: ${{ env.COMMUNITY_STORE_REPO }}
           ref: main
           path: community-store
+          persist-credentials: false
 
       - name: Read packaging build config
         id: config
         shell: bash
+        env:
+          DEFAULT_IMAGE_TAG: ${{ steps.config.outputs.image_tag }}
         run: |
           set -euo pipefail
           python3 - <<'PY2'
@@ -132,8 +135,6 @@ jobs:
               fh.write(f'next_version={next_version}\n')
               fh.write(f'image_tag={image_tag}\n')
           PY2
-        env:
-          DEFAULT_IMAGE_TAG: ${{ steps.config.outputs.image_tag }}
 
       - name: Checkout upstream Hermes Workspace
         uses: actions/checkout@v6
@@ -252,7 +253,7 @@ jobs:
             echo "No community store changes to publish"
             exit 0
           fi
-          git commit --trailer "Made-with: Cursor" -m "Release Hermes Workspace ${{ steps.release.outputs.next_version }}"
+          git commit -m "Release Hermes Workspace ${{ steps.release.outputs.next_version }}"
           for attempt in 1 2 3; do
             git fetch origin main
             git rebase origin/main && git push origin HEAD:main && exit 0
