@@ -75,26 +75,19 @@ jobs:
           from pathlib import Path
 
           config = json.loads(Path('versions.json').read_text())
+          workspace = config['components']['workspace']
+          hermes_agent = config['components']['hermes_agent']
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              for key in ('workspace_repo', 'workspace_ref', 'hermes_agent_repo', 'hermes_agent_track', 'image_tag'):
-                  fh.write(f"{key}={config[key]}\n")
+              fh.write(f"workspace_repo={workspace['repo']}\n")
+              fh.write(f"workspace_ref={workspace['ref']}\n")
+              fh.write(f"workspace_track={workspace['track']}\n")
+              fh.write(f"workspace_version={workspace.get('version', '')}\n")
+              fh.write(f"hermes_agent_repo={hermes_agent['repo']}\n")
+              fh.write(f"hermes_agent_ref={hermes_agent['ref']}\n")
+              fh.write(f"hermes_agent_track={hermes_agent['track']}\n")
+              fh.write(f"hermes_agent_version={hermes_agent.get('version', '')}\n")
+              fh.write(f"image_tag={config['image_tag']}\n")
           PY2
-
-      - name: Resolve pinned Hermes Agent commit
-        id: hermes_ref
-        shell: bash
-        run: |
-          set -euo pipefail
-          hermes_track="${{ steps.config.outputs.hermes_agent_track }}"
-          case "${hermes_track}" in
-            commit:*)
-              echo "sha=${hermes_track#commit:}" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "Unsupported hermes_agent_track format: ${hermes_track}" >&2
-              exit 1
-              ;;
-          esac
 
       - name: Determine release version and image tag
         id: release
@@ -147,7 +140,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ${{ steps.config.outputs.hermes_agent_repo }}
-          ref: ${{ steps.hermes_ref.outputs.sha }}
+          ref: ${{ steps.config.outputs.hermes_agent_ref }}
           path: upstream-hermes
 
       - name: Set up QEMU
@@ -250,7 +243,9 @@ jobs:
           UI_DIGEST: ${{ steps.ui_manifest.outputs.digest }}
           API_DIGEST: ${{ steps.api_build.outputs.digest }}
           WORKSPACE_REF: ${{ steps.config.outputs.workspace_ref }}
-          HERMES_AGENT_REF: ${{ steps.hermes_ref.outputs.sha }}
+          WORKSPACE_VERSION: ${{ steps.config.outputs.workspace_version }}
+          HERMES_AGENT_REF: ${{ steps.config.outputs.hermes_agent_ref }}
+          HERMES_AGENT_VERSION: ${{ steps.config.outputs.hermes_agent_version }}
         run: |
           set -euo pipefail
           target_dir="community-store/${COMMUNITY_STORE_APP_DIR}"
@@ -272,7 +267,19 @@ jobs:
           ui_digest = os.environ['UI_DIGEST']
           api_digest = os.environ['API_DIGEST']
           workspace_ref = os.environ['WORKSPACE_REF']
+          workspace_version = os.environ.get('WORKSPACE_VERSION', '').strip()
           hermes_agent_ref = os.environ['HERMES_AGENT_REF']
+          hermes_agent_version = os.environ.get('HERMES_AGENT_VERSION', '').strip()
+
+          def format_component(name, version, ref):
+              if version:
+                  return f'{name} {version}'
+              if ref:
+                  return f'{name} commit {ref[:7]}'
+              return name
+
+          workspace_label = format_component('Hermes Workspace', workspace_version, workspace_ref)
+          hermes_label = format_component('Hermes Agent', hermes_agent_version, hermes_agent_ref)
 
           compose_text = compose_path.read_text(encoding='utf-8')
           compose_text = re.sub(r'(^\s*image:\s*)ghcr\.io/harmalh/hermes-workspace-ui-umbrel:[^\s@]+(?:@[^\s]+)?$', rf'\1ghcr.io/harmalh/hermes-workspace-ui-umbrel:{image_tag}@{ui_digest}', compose_text, flags=re.M)
@@ -283,6 +290,18 @@ jobs:
           manifest_text = re.sub(r'^version:\s*"[^"]+"', f'version: "{release_version}"', manifest_text, flags=re.M)
           manifest_text = re.sub(r'^icon:\s*.*$', 'icon: https://raw.githubusercontent.com/harmalh/umbrel-community-store/main/harmalh-hermes-workspace/assets/icon.svg', manifest_text, flags=re.M)
           manifest_text = re.sub(r'^submission:\s*.*$', 'submission: https://github.com/harmalh/umbrel-community-store', manifest_text, flags=re.M)
+          description = (
+              'description: >-\n'
+              '  Hermes Workspace is the full Hermes browser UI for chat, files, terminal,\n'
+              '  memory, skills, and session continuity on Umbrel.\n\n'
+              '  This package runs a production build of outsourc-e/hermes-workspace in front\n'
+              '  of a Hermes API service built from outsourc-e/hermes-agent.\n\n'
+              f'  Bundled upstreams: {workspace_label} and {hermes_label}.\n\n'
+              '  The UI stays stateless while Hermes runtime data is persisted under\n'
+              '  APP_DATA_DIR/hermes.\n\n'
+              '  Build and publish both GHCR images before installing from the community store.\n'
+          )
+          manifest_text = re.sub(r'(?ms)^description:\s*>-\n.*?^developer:\s*.*$', description + 'developer: outsourc-e', manifest_text)
           release_notes = (
               'releaseNotes: >-\n'
               '  Automated private release from harmalh/umbrel-hermes-workspace.\n\n'

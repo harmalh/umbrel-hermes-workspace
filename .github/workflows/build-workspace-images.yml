@@ -12,17 +12,17 @@ on:
   workflow_dispatch:
     inputs:
       workspace_ref:
-        description: "outsourc-e/hermes-workspace git ref (tag/branch/sha)"
-        required: true
-        default: "379f3b102a2296a60ae720b5aeeeae3990e60256"
+        description: "Optional Hermes Workspace git ref override"
+        required: false
+        default: ""
       hermes_ref:
-        description: "outsourc-e/hermes-agent git ref (tag/branch/sha)"
-        required: true
-        default: "fe38075e974aba9d13b22b71e7e351284fcb333b"
+        description: "Optional Hermes Agent git ref override"
+        required: false
+        default: ""
       image_tag:
-        description: "Registry tag for both images"
-        required: true
-        default: "0.1.3"
+        description: "Optional registry tag override for both images"
+        required: false
+        default: ""
       push_image:
         description: "Push built images to GHCR"
         type: boolean
@@ -36,27 +36,52 @@ jobs:
       contents: read
       packages: write
     env:
-      EFFECTIVE_WORKSPACE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.workspace_ref || '379f3b102a2296a60ae720b5aeeeae3990e60256' }}
-      EFFECTIVE_HERMES_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.hermes_ref || 'fe38075e974aba9d13b22b71e7e351284fcb333b' }}
-      EFFECTIVE_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '0.1.3' }}
       EFFECTIVE_PUSH_IMAGE: ${{ github.event_name == 'push' || inputs.push_image }}
 
     steps:
       - name: Checkout packaging repo
         uses: actions/checkout@v6
 
+      - name: Read packaging build config
+        id: config
+        shell: bash
+        env:
+          INPUT_WORKSPACE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.workspace_ref || '' }}
+          INPUT_HERMES_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.hermes_ref || '' }}
+          INPUT_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY2'
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(Path('versions.json').read_text())
+          workspace = config['components']['workspace']
+          hermes = config['components']['hermes_agent']
+          workspace_ref = os.environ.get('INPUT_WORKSPACE_REF', '').strip() or workspace['ref']
+          hermes_ref = os.environ.get('INPUT_HERMES_REF', '').strip() or hermes['ref']
+          image_tag = os.environ.get('INPUT_IMAGE_TAG', '').strip() or config['image_tag']
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              fh.write(f"workspace_repo={workspace['repo']}\n")
+              fh.write(f'workspace_ref={workspace_ref}\n')
+              fh.write(f"hermes_repo={hermes['repo']}\n")
+              fh.write(f'hermes_ref={hermes_ref}\n')
+              fh.write(f'image_tag={image_tag}\n')
+          PY2
+
       - name: Checkout upstream Hermes Workspace
         uses: actions/checkout@v6
         with:
-          repository: outsourc-e/hermes-workspace
-          ref: ${{ env.EFFECTIVE_WORKSPACE_REF }}
+          repository: ${{ steps.config.outputs.workspace_repo }}
+          ref: ${{ steps.config.outputs.workspace_ref }}
           path: upstream-workspace
 
-      - name: Checkout upstream Hermes Agent fork
+      - name: Checkout upstream Hermes Agent
         uses: actions/checkout@v6
         with:
-          repository: outsourc-e/hermes-agent
-          ref: ${{ env.EFFECTIVE_HERMES_REF }}
+          repository: ${{ steps.config.outputs.hermes_repo }}
+          ref: ${{ steps.config.outputs.hermes_ref }}
           path: upstream-hermes
 
       - name: Set up QEMU
@@ -82,7 +107,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ env.EFFECTIVE_PUSH_IMAGE == 'true' }}
           tags: |
-            ghcr.io/harmalh/hermes-workspace-ui-umbrel:${{ env.EFFECTIVE_IMAGE_TAG }}
+            ghcr.io/harmalh/hermes-workspace-ui-umbrel:${{ steps.config.outputs.image_tag }}
 
       - name: Build Hermes API image
         id: api_build
@@ -93,7 +118,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ env.EFFECTIVE_PUSH_IMAGE == 'true' }}
           tags: |
-            ghcr.io/harmalh/hermes-workspace-api-umbrel:${{ env.EFFECTIVE_IMAGE_TAG }}
+            ghcr.io/harmalh/hermes-workspace-api-umbrel:${{ steps.config.outputs.image_tag }}
 
       - name: Print digests
         if: ${{ env.EFFECTIVE_PUSH_IMAGE == 'true' }}

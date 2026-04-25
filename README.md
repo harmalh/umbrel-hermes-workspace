@@ -17,9 +17,9 @@ The canonical install surface remains:
 
 The editable packaging source configuration lives in `versions.json`.
 
-- Hermes Workspace upstream repo/ref are read from that file.
-- Hermes API upstream is pinned to a specific tested `outsourc-e/hermes-agent`
-  commit for reproducible Umbrel releases.
+- `components.workspace` tracks the bundled Hermes Workspace upstream.
+- `components.hermes_agent` tracks the bundled Hermes Agent upstream from `outsourc-e/hermes-agent`.
+- Mixed-app detection should report workspace and Hermes Agent changes separately before packaging them together.
 - Current tested release pins:
   - `outsourc-e/hermes-workspace@379f3b102a2296a60ae720b5aeeeae3990e60256`
   - `outsourc-e/hermes-agent@fe38075e974aba9d13b22b71e7e351284fcb333b`

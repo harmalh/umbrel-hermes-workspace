@@ -4,7 +4,7 @@ name: Hermes Workspace
 tagline: Full Hermes browser workspace for chat, files, memory, and terminal
 icon: https://raw.githubusercontent.com/harmalh/umbrel-hermes-workspace/main/app/assets/icon.svg
 category: ai
-version: "0.1.3"
+version: "0.1.4"
 port: 23130
 description: >-
   Hermes Workspace is the full Hermes browser UI for chat, files, terminal,
@@ -13,6 +13,10 @@ description: >-
 
   This package runs a production build of outsourc-e/hermes-workspace in front
   of a Hermes API service built from outsourc-e/hermes-agent.
+
+
+  Bundled upstreams: Hermes Workspace commit 379f3b1 and Hermes Agent commit
+  fe38075.
 
 
   The UI stays stateless while Hermes runtime data is persisted under
@@ -28,11 +32,12 @@ repo: https://github.com/outsourc-e/hermes-workspace
 support: https://github.com/outsourc-e/hermes-workspace/issues
 gallery: []
 releaseNotes: >-
-  Update Hermes Workspace to upstream commit 379f3b102a2296a60ae720b5aeeeae3990e60256
-  and refresh the bundled Hermes API to fe38075e974aba9d13b22b71e7e351284fcb333b.
+  Automated private release from harmalh/umbrel-hermes-workspace.
 
-  This release picks up the newer Workspace v1-era fixes, including the chat
-  history/tab-switch fix, and ships new digest-pinned UI and API images.
+  Workspace ref: 379f3b102a2296a60ae720b5aeeeae3990e60256
+  Hermes Agent ref: fe38075e974aba9d13b22b71e7e351284fcb333b
+  UI image: ghcr.io/harmalh/hermes-workspace-ui-umbrel:0.1.4@sha256:3cb92a27b8cb932ebaa9a65d42b561e3969f3913e26f4d7a89f5a7d58a6e4925
+  API image: ghcr.io/harmalh/hermes-workspace-api-umbrel:0.1.4@sha256:afdf50c7c9b5b9f9f8372841d4aa652c7434ecab0026270df8ba9725767667b2
 dependencies: []
 path: ""
 defaultUsername: ""

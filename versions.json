@@ -1,7 +1,15 @@
 {
-  "workspace_repo": "outsourc-e/hermes-workspace",
-  "workspace_ref": "379f3b102a2296a60ae720b5aeeeae3990e60256",
-  "hermes_agent_repo": "outsourc-e/hermes-agent",
-  "hermes_agent_track": "commit:fe38075e974aba9d13b22b71e7e351284fcb333b",
-  "image_tag": "0.1.3"
+  "components": {
+    "workspace": {
+      "repo": "outsourc-e/hermes-workspace",
+      "track": "branch:main",
+      "ref": "379f3b102a2296a60ae720b5aeeeae3990e60256"
+    },
+    "hermes_agent": {
+      "repo": "outsourc-e/hermes-agent",
+      "track": "branch:main",
+      "ref": "fe38075e974aba9d13b22b71e7e351284fcb333b"
+    }
+  },
+  "image_tag": "0.1.4"
 }
